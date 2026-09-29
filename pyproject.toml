@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pendant"
+version = "0.2.0"
+description = "A bounded multi-agent MIDI composer with optional Flower runtime"
+license = { file = "LICENSE" }
+requires-python = ">=3.11"
+dependencies = ["flwr>=1.39.0,<1.40", "openai>=2.16,<4", "pretty_midi>=0.2.10,<0.3", "typing_extensions>=4.5"]
+
+[tool.setuptools]
+py-modules = ["pipeline"]
+
+[tool.setuptools.packages.find]
+include = ["agents*", "core*", "pendant_flower*"]
+
+[tool.flwr.app]
+publisher = "local"
+fab-format-version = 1
+flwr-version-target = "1.39.0"
+fab-include = ["agents/**/*.py", "core/**/*.py", "pendant_flower/**/*.py", "pipeline.py", "prompts.json", "README.md", "LICENSE"]
+
+[tool.flwr.app.components]
+agentapp = "pendant_flower.agent_app:app"
+
+[tool.flwr.app.config]
+"agent.input" = ""
+provider = "offline"
+mode = "pipeline"
+model = "gpt-5-mini"
+bars = 16
+max-calls = 60
+critic-rounds = 2
+output-dir = "outputs/flower"
+audio = false
