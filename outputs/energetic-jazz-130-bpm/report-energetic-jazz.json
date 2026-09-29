@@ -1,0 +1,45 @@
+{
+ "prompt": "energetic jazz, 130 BPM",
+ "provider": "openai",
+ "bars": 16,
+ "order": [
+  "drums",
+  "bass",
+  "chords",
+  "melody"
+ ],
+ "api_calls": 5,
+ "calls_by_agent": {
+  "composer": 1,
+  "drums": 1,
+  "bass": 1,
+  "chords": 1,
+  "melody": 1
+ },
+ "agents": {
+  "drums": {
+   "attempts": 1,
+   "repairs": []
+  },
+  "bass": {
+   "attempts": 1,
+   "repairs": []
+  },
+  "chords": {
+   "attempts": 1,
+   "repairs": []
+  },
+  "melody": {
+   "attempts": 1,
+   "repairs": []
+  }
+ },
+ "feedback": {
+  "drums": "",
+  "bass": "",
+  "chords": "",
+  "melody": ""
+ },
+ "blueprint_revisions": 0,
+ "critic": []
+}

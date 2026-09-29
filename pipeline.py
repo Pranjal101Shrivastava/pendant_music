@@ -24,6 +24,9 @@ import re
 import sys
 from typing import Callable, Dict, List
 
+from dotenv import load_dotenv
+load_dotenv()  # loads .env from the project root before any env reads
+
 from agents import bass, chords, composer, critic, drums, melody
 from agents.base import AgentFailed
 from core.config import Settings
