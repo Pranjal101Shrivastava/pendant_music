@@ -17,7 +17,7 @@ py-modules = ["pipeline"]
 include = ["agents*", "core*", "pendant_flower*"]
 
 [tool.flwr.app]
-publisher = "local"
+publisher = "Anastasia"
 fab-format-version = 1
 flwr-version-target = "1.39.0"
 fab-include = ["agents/**/*.py", "core/**/*.py", "pendant_flower/**/*.py", "pipeline.py", "prompts.json", "README.md", "LICENSE"]

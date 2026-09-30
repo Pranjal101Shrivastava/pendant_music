@@ -101,7 +101,7 @@ def critic_loop(llm, settings: Settings, bp: dict, parts: Dict[str, List[dict]],
 
 
 def run(prompt: str, settings: Settings, bars: int = 16, out_root: str = None, llm=None,
-        audio: bool = False, log: Log = print) -> dict:
+        audio: bool = False, mp4: bool = False, log: Log = print) -> dict:
     settings.validate()
     if type(bars) is not int or bars < 1:
         raise ValueError("bars must be a positive integer")
@@ -156,6 +156,13 @@ def run(prompt: str, settings: Settings, bars: int = 16, out_root: str = None, l
             files.append(render_wav(midi_path, os.path.join(out_dir, "song.wav")))
         except (FileNotFoundError, OSError) as e:
             log(f"  audio skipped: {e}")
+    if mp4:
+        from core.video import render_mp4
+
+        try:
+            files.append(render_mp4(midi_path, os.path.join(out_dir, "song.mp4")))
+        except (FileNotFoundError, OSError) as e:
+            log(f"  mp4 skipped: {e}")
     log(f"  wrote {', '.join(_show(p) for p in files)} "
         f"({budget.used} calls: {budget.by_agent})")
     return {"blueprint": bp, "parts": parts, "song": song, "report": report, "out_dir": out_dir}
@@ -173,6 +180,7 @@ def main(argv=None) -> int:
     p.add_argument("--max-calls", type=int, default=None, help="global cap on model calls per run")
     p.add_argument("--seed", type=int, default=None)
     p.add_argument("--audio", action="store_true", help="also render song.wav with FluidSynth")
+    p.add_argument("--mp4", action="store_true", help="also render song.mp4 (FluidSynth + ffmpeg)")
     p.add_argument("--out", default=None, help="output folder (default outputs/)")
     args = p.parse_args(argv)
     if not args.prompt and not args.all:
@@ -186,7 +194,7 @@ def main(argv=None) -> int:
     prompts = [args.prompt] if args.prompt else json.load(open(os.path.join(ROOT, "prompts.json")))
     try:
         for prompt in prompts:
-            run(prompt, settings, bars=args.bars, out_root=args.out, audio=args.audio)
+            run(prompt, settings, bars=args.bars, out_root=args.out, audio=args.audio, mp4=args.mp4)
     except (LLMError, AgentFailed, RuntimeError, ValueError) as e:
         print(f"\nerror: {e}", file=sys.stderr)
         return 1
