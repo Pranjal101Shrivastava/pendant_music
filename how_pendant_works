@@ -1,0 +1,527 @@
+Pendant: How It Works
+
+Overview
+Pendant turns a short text prompt like "sad lo-fi, 80 BPM" into a playable 16-bar MIDI song, written by a band of AI agents. Each agent plays one role, the way musicians in a real band do: a composer plans the song, then drums, bass, chords and melody each write their own part.
+
+Two safety nets keep the music correct. A plain-code validator (no AI) checks every note against music-theory rules. A critic agent listens to the whole song and sends specific bars back to the agent responsible.
+
+Every run writes three files into outputs/<prompt>/:
+
+song.mid: the song, ready to import into any DAW (GarageBand, Ableton, FL Studio) or MIDI player
+
+song.json: the composer's blueprint plus every note each instrument played
+
+report.json: how the run went (model calls per agent, retries, repairs, critic rounds)
+
+The project runs with OpenAI models (default gpt-5-mini) or fully offline with rule-based stand-in musicians, so it works without an API key. It can also run inside Flower as an AgentApp, covered in its own section below.
+
+Source: Pranjal101Shrivastava/pendant_music, branch codex/complete-pendant. Python 3.11+, version 0.2.0.
+
+How a song gets made
+A run goes composer → four instruments in order → critic → files. Each instrument hears the parts written before it, and nothing reaches the MIDI file without passing the validator. The diagram after the steps shows both loops.
+
+Composer writes the blueprint. From the prompt it picks key, mode, tempo, time signature and sections (for example Intro, Verse, Chorus, Outro). Each section gets one chord per bar, an energy level from 0 to 1, and a list of which instruments play. It also picks a General MIDI sound for bass, chords and melody. The validator checks the blueprint: every chord must use only notes of the key.
+
+Drums write the groove first. The drummer starts from a genre template (pop/rock, lo-fi, funk, jazz, ambient) and varies it. Every hit sits on the 16th-note grid.
+
+Bass locks to the kick drum. It sees the drum part and plays one note at a time.
+
+Chords fill the harmony. At most 6 notes sound at once, following the blueprint's chord for each bar.
+
+Melody goes on top. It hears everything before it and plays one note at a time.
+
+Validator checks every part. It checks pitch range, key, song length, overlapping notes, one-note-at-a-time for bass and melody, and the drum grid. Instruments may only play in sections that list them. Each error names the bar and beat, and goes back to the same agent for up to 2 retries. If retries run out, code repairs the best attempt (moves notes into range or key, trims overlaps).
+
+Critic reviews the whole song. It scores four areas from 1 to 5: groove, harmonic fit, variation and balance. It also gets objective measurements from code (core/analysis.py). It either accepts or names at most 3 issues, each with one agent and a bar range.
+
+Flagged agents rewrite only the flagged bars. Everything else in their part stays the same. The critic runs at most 2 rounds. The best-scoring version wins, even if a revision made things worse.
+
+Files are written. song.mid, song.json and report.json, plus song.wav if audio is on.
+
+A global budget caps every run at 60 model calls by default, including retries and critic rounds.
+
+The inner loop sends validator errors back to the same musician; the outer loop sends critic issues back for flagged bars only.
+
+Autonomous mode (version 2)
+--mode autonomous turns on three extras. The core pieces stay the same.
+
+Switch
+
+What changes
+
+Self-check (7a)
+
+Each instrument can call a check_my_part tool to run the validator on a draft before answering
+
+Orchestration (7b)
+
+The composer chooses which instruments play and in what order, instead of the fixed drums → bass → chords → melody
+
+Feedback (7c)
+
+Each instrument can send a note back ("this tempo is too fast for the bass line"). The composer may revise the blueprint once, and the parts are rewritten
+
+Code map
+About 2,500 lines of Python in four folders: agents/ (the band), core/ (shared rules and plumbing), pendant_flower/ (Flower wrapper) and tests/.
+
+File
+
+Job
+
+pipeline.py
+
+Entry point and CLI. Runs composer → instruments → critic loop → writes files
+
+agents/composer.py
+
+Writes the blueprint; in autonomous mode also picks instrument order and answers feedback
+
+agents/base.py
+
+Shared instrument loop: builds the prompt, calls the model, runs the validator, retries, repairs, rewrites flagged bars, check_my_part tool
+
+agents/drums.py · bass.py · chords.py · melody.py
+
+One short file each: the musician's instructions (genre templates, one-note rule and so on)
+
+agents/critic.py
+
+Scores the song on the 4-part rubric and names up to 3 issues; never edits notes
+
+agents/offline.py
+
+Rule-based stand-ins for every agent, used when there is no API key
+
+core/validator.py
+
+Plain-code rule checks and the last-resort repair_part(). Pitch ranges: drums 35–81, bass 28–60, chords 36–96, melody 48–96
+
+core/theory.py
+
+Note names, keys, chord symbols (MIDI 60 = C4)
+
+core/timeline.py
+
+Bars, beats, sections and which instruments play in each bar
+
+core/schemas.py
+
+The shared data contract: a note is pitch, start_beat, duration, velocity; a beat is a quarter note
+
+core/json_schemas.py
+
+Strict JSON schemas the models must answer with (OpenAI structured outputs)
+
+core/llm.py
+
+Model access: OpenAIResponsesProvider (default), OpenAIProvider (Chat Completions), OfflineProvider, and the CallBudget cap
+
+core/config.py
+
+Settings: provider, models, retries, call cap, critic rounds, autonomous switches; reads env vars
+
+core/describe.py
+
+Turns blueprints and parts into compact text for prompts
+
+core/analysis.py
+
+Measures groove, harmonic fit, variation and balance for the critic
+
+core/midi_writer.py
+
+Song → .mid with pretty_midi: one track per instrument, drums on channel 10
+
+core/audio.py
+
+Optional .mid → .wav with FluidSynth
+
+pendant_flower/agent_app.py
+
+Runs the whole band inside one Flower AgentApp
+
+scripts/flower_smoke.py
+
+End-to-end Flower check with a real local SuperLink and a mock model server
+
+tests/
+
+pytest suite; no paid model calls (fake OpenAI client, scripted agents)
+
+prompts.json
+
+The fixed test prompts used by --all
+
+music-agents-prompt.md
+
+The original design plan
+
+docs/flower.md · docs/HANDOFF.md
+
+Flower setup guide and the handoff notes for this branch
+
+Running it
+Three commands get a song with no API key: create a venv, install requirements.txt, run pipeline.py with a prompt.
+
+git clone -b codex/complete-pendant https://github.com/Pranjal101Shrivastava/pendant_music
+cd pendant_music
+python -m venv .venv
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+
+python pipeline.py "sad lo-fi, 80 BPM"     # -> outputs/sad-lo-fi-80-bpm/song.mid
+python pipeline.py --all                   # every prompt in prompts.json
+python -m pytest                           # tests, no paid calls
+Offline or OpenAI. With no OPENAI_API_KEY, every agent is played by the rule-based stand-ins in agents/offline.py. With a key, the default --provider auto switches to OpenAI:
+
+export OPENAI_API_KEY=...
+python pipeline.py "upbeat funk, 110 BPM" --provider openai --mode autonomous
+Command-line options
+Option
+
+Default
+
+What it does
+
+--bars N
+
+16
+
+Song length
+
+--provider auto|openai|offline
+
+auto
+
+auto = OpenAI when a key is set, else offline
+
+--mode pipeline|autonomous
+
+pipeline
+
+autonomous turns on self-check, orchestration and feedback
+
+--critic-rounds N
+
+2
+
+0 turns the critic off; 2 is the maximum
+
+--max-calls N
+
+60
+
+Cap on model calls per run
+
+--seed N
+
+0
+
+Varies the offline musicians
+
+--audio
+
+off
+
+Also render song.wav (needs FluidSynth + a .sf2 SoundFont)
+
+--out DIR
+
+outputs/
+
+Where song folders go
+
+--all
+
+off
+
+Run every prompt in prompts.json
+
+Environment variables
+Variable
+
+What it sets
+
+OPENAI_API_KEY
+
+Your OpenAI key; only read from the environment, never stored
+
+PENDANT_PROVIDER
+
+auto, openai or offline
+
+PENDANT_MODEL
+
+Model for every agent (default gpt-5-mini)
+
+PENDANT_MODEL_<AGENT>
+
+One agent's model: COMPOSER, DRUMS, BASS, CHORDS, MELODY or CRITIC
+
+PENDANT_API
+
+responses (default) or chat for legacy Chat Completions
+
+PENDANT_MAX_API_CALLS
+
+Call cap per run
+
+PENDANT_MAX_RETRIES
+
+Validator retries per agent (0–3)
+
+PENDANT_CRITIC_ROUNDS
+
+Critic rounds (0–2)
+
+PENDANT_REASONING_EFFORT
+
+e.g. low or medium for reasoning models
+
+FLUIDSYNTH · PENDANT_SOUNDFONT
+
+Paths to the FluidSynth binary and .sf2 file for --audio
+
+pipeline.py also loads a .env file from the project root through python-dotenv. .env.example lists every variable; never commit a real key.
+
+Outputs
+Each prompt gets its own folder named after the prompt (outputs/sad-lo-fi-80-bpm/) holding three files.
+
+File
+
+Contents
+
+song.mid
+
+One track per instrument with its General MIDI sound; drums on channel 10; tempo and time signature set. Open it in any DAW
+
+song.json
+
+blueprint (title, style, key, mode, tempo, sections with chords, energy and instruments, GM programs) and song (every note per instrument as pitch, start_beat, duration, velocity)
+
+report.json
+
+Prompt, provider, bars, instrument order, total model calls, calls per agent, attempts and code repairs per instrument, feedback to the composer, blueprint revisions, and each critic round's verdict, scores and issues
+
+The five demo songs
+All five in the branch's outputs folder were made with the OpenAI provider, 16 bars each. Every instrument passed the validator on its first attempt, so no code repairs were needed.
+
+Prompt
+
+Title
+
+Key
+
+BPM
+
+Sections
+
+Model calls
+
+Critic
+
+sad lo-fi
+
+Sad Lo-Fi Sketch
+
+A minor
+
+80
+
+Intro, Verse, Outro
+
+9
+
+Revised melody once; score 4.75 → 5.0
+
+dreamy ambient
+
+Dream Drift
+
+C major
+
+70
+
+Intro, Main, Outro
+
+7
+
+Revised bass once; score 4.5 → 4.5. No drums
+
+bright pop
+
+Bright Pop Short
+
+C major
+
+100
+
+Intro, Verse, Chorus, Outro
+
+5
+
+Off
+
+driving rock
+
+Driving Rock - 16 Bar
+
+E minor
+
+120
+
+Intro, Verse, Chorus, Outro
+
+5
+
+Off
+
+energetic jazz
+
+Energetic Jazz Head
+
+Bb major
+
+130
+
+Intro, Head A, Bridge, Outro
+
+5
+
+Off
+
+Three of the runs used 5 calls (one per agent), so they ran with the critic turned off. The ambient song left drums out entirely, which suggests the composer chose the band in autonomous mode. Some filenames differ from the default song.mid (for example song-sad-lo-fi-80-bpm.mid); they were renamed after the runs.
+
+Using Flower
+Pendant ships as one Flower AgentApp, so you type a music prompt into flwr chat and the whole band runs inside Flower. I ran this end to end on 2026-09-30 with Flower 1.39.0, offline provider: it made an 8-bar funk song in 7 calls.
+
+What Flower does here. Flower runs the app, carries your chat prompt to it, and streams progress back. With the OpenAI provider, it also proxies model calls so your key stays on the SuperLink. It does not spread the musicians across machines: all agents run inside the one AgentApp (pendant_flower/agent_app.py), which calls the same run() as the command line.
+
+Run it offline (no API key)
+Clone into a folder without an underscore. flwr build rejects pendant_music, because app names allow only letters, digits and hyphens.
+
+git clone -b codex/complete-pendant https://github.com/Pranjal101Shrivastava/pendant_music pendant
+cd pendant
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements-flower.txt      # Pendant + flwr 1.39.x
+Edit [tool.flwr.app.config] in pyproject.toml. Use an absolute output-dir, because the app runs in its own process:
+
+provider = "offline"
+mode = "autonomous"
+bars = 8
+output-dir = "/absolute/path/to/pendant/outputs/flower"
+Check that the bundle builds: flwr build should print Successfully built local.pendant.0-2-0.<hash>.fab.
+
+Start chat against the local SuperLink. Without the variable, flwr chat tried Flower's hosted SuperLink (api.flower.ai) in my test and failed:
+
+FLWR_CHAT_SUPERLINK=local flwr chat
+In the chat, type /load ., wait for Loaded @local/pendant, then type a prompt such as upbeat funk, 110 BPM.
+
+The reply names the song and the folder. Each run gets its own random subfolder: <output-dir>/<run id>/<prompt>/song.mid, plus song.json and report.json. Leave with /quit.
+
+After the reply, Flower may print Error: Chat run ended before the agent response completed. In my run the song was already written, so the files are fine. After changing code or config, type /load . again. Don't use flwr run: on 1.39 it leaves out the prompt the SuperLink requires.
+
+Run it with OpenAI models
+Set provider = "openai" in pyproject.toml (optionally model = "...").
+
+Start your own SuperLink with the OpenAI endpoint and key:
+
+export FLWR_MODEL_API_ENDPOINT=https://api.openai.com/v1/responses
+export FLWR_MODEL_API_KEY="$OPENAI_API_KEY"
+flower-superlink --insecure --host 127.0.0.1 --port 8000 --fleet-api-address 127.0.0.1:9092
+Add the connection to ~/.flwr/config.toml (or $FLWR_HOME/config.toml):
+
+[superlink.pendant]
+address = "127.0.0.1:8000"
+insecure = true
+In a second terminal with the venv active: FLWR_CHAT_SUPERLINK=pendant flwr chat, then /load . and your prompt.
+
+The app never sees your OpenAI key. Flower gives it FLWR_RUNTIME_BASE_URL and FLWR_RUNTIME_API_KEY, and the SuperLink forwards requests to OpenAI. PENDANT_MODEL_<AGENT> still overrides one agent's model on a local runtime. --insecure is for your own machine only. This path passed against a mock OpenAI server in the smoke test, but has not been tried with a real OpenAI account.
+
+App settings
+Key in [tool.flwr.app.config]
+
+Default
+
+Meaning
+
+provider
+
+offline
+
+offline or openai (no auto under Flower)
+
+mode
+
+pipeline
+
+autonomous turns on self-check, orchestration and feedback
+
+model
+
+gpt-5-mini
+
+Shared model for all agents
+
+bars
+
+16
+
+Song length
+
+max-calls
+
+60
+
+Cap on Pendant's model calls; Flower's own chat-title request is not counted
+
+critic-rounds
+
+2
+
+0–2
+
+output-dir
+
+outputs/flower
+
+Where songs are saved, on the machine running the app
+
+audio
+
+false
+
+Also render WAV (needs FluidSynth + SoundFont on that machine)
+
+agent.input
+
+empty
+
+Leave empty so the chat prompt is used
+
+The latest song's MIDI bytes, song.json and report.json are also kept in Flower's run state under context.state["pendant.latest"]. Flower Chat has no download button for the file; take it from output-dir.
+
+Check the integration without a key
+python scripts/flower_smoke.py starts a real local SuperLink plus a fake OpenAI server, then runs an offline song and a mock-OpenAI song. It checks 11 music requests, 4 check_my_part round trips and a valid MIDI file. On 2026-09-30 it printed PASS for both runs (Linux/macOS only).
+
+Tests, limits and differences from the plan
+All 107 tests pass (python -m pytest, run on 2026-09-30 with Python 3.11) with no API key and no paid calls. They cover the validator rules, music theory, MIDI writing, agents, critic, pipeline, both OpenAI transports (with a fake client) and the Flower app.
+
+Limits to know
+
+Real OpenAI quality is untested by the tests. The five demo songs came from OpenAI runs, but the test suite and smoke check use fake clients.
+
+Audio needs your own tools. --audio needs a FluidSynth binary and a licensed General MIDI .sf2 SoundFont, neither bundled. Without them the MIDI is still written and a message explains why the WAV was skipped.
+
+Hard caps by design. Up to 2 validator retries per agent, 2 critic rounds, 3 issues per round, 1 blueprint revision, 60 calls per run. Setting a higher value fails at startup.
+
+Chords must stay in the key. The composer may not use borrowed or secondary-dominant chords, which limits some genres (jazz especially).
+
+No licence to reuse. LICENSE keeps all rights with the owner; it exists only because Flower's bundle format requires the file.
+
+Flower is pinned to 1.39.x, because the AgentApp API is new.
+
+
+
+Branch status. codex/complete-pendant was prepared on 2026-09-29 from adse1823/Pendant main, and its handoff note (docs/HANDOFF.md) says not to merge until reviewed.
+
